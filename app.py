@@ -462,7 +462,6 @@ def render_overview_tab(gym_name: str, storage: StorageBackend) -> None:
                 val = int(new_available)
                 username = st.session_state.get("username", "exco")
                 set_gym_available_passes(gym_name, val, storage=storage, updated_by=username, note=update_note)
-                st.session_state[f"avail_passes_{gym_name}"] = val
                 st.toast(f"✅ Successfully updated and saved {gym_name} available passes to {val}.")
                 st.rerun()
 
