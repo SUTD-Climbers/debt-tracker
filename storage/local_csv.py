@@ -70,14 +70,43 @@ class LocalCsvStorage(StorageBackend):
         self.records_file = self.data_dir / "records.csv"
         self.uploads_file = self.data_dir / "uploads.csv"
         self.members_file = self.data_dir / "members.csv"
+        self.balances_file = self.data_dir / "balances.csv"
         self.seed_file = self.data_dir / "seed_google_sheet.json"
 
         self._ensure_file(self.records_file, RECORD_COLUMNS)
         self._ensure_file(self.uploads_file, UPLOAD_COLUMNS)
         self._ensure_file(self.members_file, MEMBER_COLUMNS)
+        BALANCE_COLUMNS = ["gym", "available_passes", "updated_at", "updated_by", "note"]
+        self._ensure_file(self.balances_file, BALANCE_COLUMNS)
+        self._ensure_default_balances()
 
         # seed initial google sheet data if records file has no entries
         self._seed_initial_sheet_data_if_empty()
+
+    def _ensure_default_balances(self) -> None:
+        # seed default balances if file has only headers
+        if not self.balances_file.exists():
+            return
+        rows = []
+        try:
+            with open(self.balances_file, "r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+        except Exception:
+            rows = []
+        if not rows:
+            defaults = [
+                {"gym": "Boulder +", "available_passes": "9", "updated_at": datetime.now().strftime("%d/%m/%Y %H:%M"), "updated_by": "system", "note": "Initial setup"},
+                {"gym": "Fitbloc", "available_passes": "0", "updated_at": datetime.now().strftime("%d/%m/%Y %H:%M"), "updated_by": "system", "note": "Initial setup"},
+                {"gym": "Boulder Planet", "available_passes": "18", "updated_at": datetime.now().strftime("%d/%m/%Y %H:%M"), "updated_by": "system", "note": "Initial setup"},
+                {"gym": "BFF", "available_passes": "0", "updated_at": datetime.now().strftime("%d/%m/%Y %H:%M"), "updated_by": "system", "note": "Initial setup"},
+            ]
+            BALANCE_COLUMNS = ["gym", "available_passes", "updated_at", "updated_by", "note"]
+            with open(self.balances_file, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=BALANCE_COLUMNS)
+                writer.writeheader()
+                for r in defaults:
+                    writer.writerow(r)
 
     def _ensure_file(self, file_path: Path, columns: List[str]) -> None:
         # ensure csv file exists with appropriate header row
@@ -381,3 +410,77 @@ class LocalCsvStorage(StorageBackend):
             "tier_2_count": t2_count,
             "members": members,
         }
+
+    def get_all_available_passes(self) -> Dict[str, int]:
+        from parsers.sheet_parser import normalize_gym_name
+        balances = {"Boulder +": 9, "Fitbloc": 0, "Boulder Planet": 18, "BFF": 0}
+        if not self.balances_file.exists():
+            return balances
+        try:
+            with open(self.balances_file, "r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    g = row.get("gym", "").strip()
+                    if g:
+                        norm = normalize_gym_name(g)
+                        try:
+                            balances[norm] = int(float(row.get("available_passes", 0)))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+        return balances
+
+    def get_available_passes(self, gym: str = "Boulder +") -> int:
+        from parsers.sheet_parser import normalize_gym_name
+        norm = normalize_gym_name(gym)
+        all_b = self.get_all_available_passes()
+        defaults = {"Boulder +": 9, "Fitbloc": 0, "Boulder Planet": 18, "BFF": 0}
+        return all_b.get(norm, defaults.get(norm, 0))
+
+    def set_available_passes(
+        self,
+        gym: str,
+        count: int,
+        updated_by: str = "",
+        note: str = "",
+    ) -> None:
+        from parsers.sheet_parser import normalize_gym_name
+        norm = normalize_gym_name(gym)
+        BALANCE_COLUMNS = ["gym", "available_passes", "updated_at", "updated_by", "note"]
+        rows = []
+        found = False
+        now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+        if self.balances_file.exists():
+            try:
+                with open(self.balances_file, "r", newline="", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for r in reader:
+                        if normalize_gym_name(r.get("gym", "")) == norm:
+                            rows.append({
+                                "gym": norm,
+                                "available_passes": str(count),
+                                "updated_at": now_str,
+                                "updated_by": updated_by,
+                                "note": note,
+                            })
+                            found = True
+                        else:
+                            rows.append(r)
+            except Exception:
+                pass
+        if not found:
+            rows.append({
+                "gym": norm,
+                "available_passes": str(count),
+                "updated_at": now_str,
+                "updated_by": updated_by,
+                "note": note,
+            })
+        temp_file = self.balances_file.with_suffix(".tmp")
+        with open(temp_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=BALANCE_COLUMNS)
+            writer.writeheader()
+            for r in rows:
+                writer.writerow({col: r.get(col, "") for col in BALANCE_COLUMNS})
+        os.replace(temp_file, self.balances_file)

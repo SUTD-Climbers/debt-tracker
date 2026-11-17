@@ -74,6 +74,14 @@ def get_configured_pass_price(
     return get_pass_price(gym_name, tier=tier)
 
 
+DEFAULT_AVAILABLE_PASSES = {
+    "Boulder +": 9,
+    "Fitbloc": 0,
+    "Boulder Planet": 18,
+    "BFF": 0,
+}
+
+
 def init_session_state() -> None:
     # initialize session state variables
     if "authenticated" not in st.session_state:
@@ -81,38 +89,58 @@ def init_session_state() -> None:
     if "username" not in st.session_state:
         st.session_state.username = ""
     if "available_passes" not in st.session_state:
-        st.session_state.available_passes = 142
+        st.session_state.available_passes = 9
     if "available_passes_map" not in st.session_state:
-        st.session_state.available_passes_map = {
-            "Boulder +": 142,
-            "Fitbloc": 50,
-            "Boulder Planet": 18,
-        }
+        st.session_state.available_passes_map = dict(DEFAULT_AVAILABLE_PASSES)
     if "pending_upload" not in st.session_state:
         st.session_state.pending_upload = None
     if "cached_members" not in st.session_state:
         st.session_state.cached_members = []
 
 
-def get_gym_available_passes(gym_name: str) -> int:
-    # return available pool balance for specified gym
-    defaults = {
-        "Boulder +": 142,
-        "Fitbloc": 50,
-        "Boulder Planet": 18,
-    }
-    if "available_passes_map" not in st.session_state:
-        st.session_state.available_passes_map = dict(defaults)
-    return st.session_state.available_passes_map.get(gym_name, defaults.get(gym_name, 50))
+def get_gym_available_passes(gym_name: str, storage: Optional[StorageBackend] = None) -> int:
+    # return available pool balance for specified gym from storage or session state
+    from parsers.sheet_parser import normalize_gym_name
+    norm = normalize_gym_name(gym_name)
+    if storage is not None:
+        try:
+            val = storage.get_available_passes(gym_name)
+            if "available_passes_map" not in st.session_state:
+                st.session_state.available_passes_map = {}
+            st.session_state.available_passes_map[norm] = val
+            st.session_state.available_passes_map[gym_name] = val
+            return val
+        except Exception:
+            pass
+    if "available_passes_map" in st.session_state:
+        if gym_name in st.session_state.available_passes_map:
+            return st.session_state.available_passes_map[gym_name]
+        if norm in st.session_state.available_passes_map:
+            return st.session_state.available_passes_map[norm]
+    return DEFAULT_AVAILABLE_PASSES.get(norm, 0)
 
 
-def set_gym_available_passes(gym_name: str, val: int) -> None:
-    # update available pool balance for specified gym
+def set_gym_available_passes(
+    gym_name: str,
+    val: int,
+    storage: Optional[StorageBackend] = None,
+    updated_by: str = "",
+    note: str = "",
+) -> None:
+    # update available pool balance for specified gym in storage and session state
+    from parsers.sheet_parser import normalize_gym_name
+    norm = normalize_gym_name(gym_name)
     if "available_passes_map" not in st.session_state:
         st.session_state.available_passes_map = {}
     st.session_state.available_passes_map[gym_name] = val
-    if gym_name == "Boulder +":
+    st.session_state.available_passes_map[norm] = val
+    if norm == "Boulder +":
         st.session_state.available_passes = val
+    if storage is not None:
+        try:
+            storage.set_available_passes(gym_name, val, updated_by=updated_by, note=note)
+        except Exception:
+            pass
 
 
 @st.cache_data
@@ -378,7 +406,7 @@ def render_overview_tab(gym_name: str, storage: StorageBackend) -> None:
     t2_owed = sum(m["passes_owed"] for m in member_debts if m.get("tier") == "tier_2")
     t2_dollars = sum(m["amount_owed"] for m in member_debts if m.get("tier") == "tier_2")
 
-    current_avail = get_gym_available_passes(gym_name)
+    current_avail = get_gym_available_passes(gym_name, storage=storage)
 
     # summary metrics
     cards = [
@@ -431,8 +459,11 @@ def render_overview_tab(gym_name: str, storage: StorageBackend) -> None:
             )
         with ucols[2]:
             if st.button("Update Balance", type="primary", width="stretch", key=f"btn_update_balance_{gym_name}"):
-                set_gym_available_passes(gym_name, new_available)
-                st.toast(f"Updated available passes to {new_available}.")
+                val = int(new_available)
+                username = st.session_state.get("username", "exco")
+                set_gym_available_passes(gym_name, val, storage=storage, updated_by=username, note=update_note)
+                st.session_state[f"avail_passes_{gym_name}"] = val
+                st.toast(f"✅ Successfully updated and saved {gym_name} available passes to {val}.")
                 st.rerun()
 
     filtered_members = [

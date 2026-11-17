@@ -70,6 +70,7 @@ class GoogleSheetsStorage(StorageBackend):
         self._members_cache: List[Dict[str, Any]] = []
         self._records_cache: Optional[List[Dict[str, Any]]] = None
         self._records_cache_time: float = 0.0
+        self._balances_cache: Optional[Dict[str, int]] = None
 
     def invalidate_records_cache(self) -> None:
         # invalidate in-memory cached records so next read queries Google Sheets
@@ -213,6 +214,17 @@ class GoogleSheetsStorage(StorageBackend):
                 if "Uploads" not in sheet_titles:
                     ws = self._spreadsheet.add_worksheet(title="Uploads", rows=1000, cols=len(UPLOAD_COLUMNS))
                     ws.append_row(UPLOAD_COLUMNS)
+                if "Balances" not in sheet_titles:
+                    b_ws = self._spreadsheet.add_worksheet(title="Balances", rows=50, cols=5)
+                    b_ws.append_row(["gym", "available_passes", "updated_at", "updated_by", "note"])
+                    from datetime import datetime
+                    now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+                    b_ws.append_rows([
+                        ["Boulder +", "9", now_str, "system", "Configured balance"],
+                        ["Fitbloc", "0", now_str, "system", "Configured balance"],
+                        ["Boulder Planet", "18", now_str, "system", "Configured balance"],
+                        ["BFF", "0", now_str, "system", "Configured balance"],
+                    ])
                 if "Members" in sheet_titles:
                     m_ws = self._spreadsheet.worksheet("Members")
                     self._spreadsheet.del_worksheet(m_ws)
@@ -662,3 +674,82 @@ class GoogleSheetsStorage(StorageBackend):
             "tier_2_count": t2_count,
             "members": members_list,
         }
+
+    def get_all_available_passes(self, force_refresh: bool = False) -> Dict[str, int]:
+        from parsers.sheet_parser import normalize_gym_name
+        if not force_refresh and self._balances_cache is not None:
+            return self._balances_cache
+
+        defaults = {"Boulder +": 9, "Fitbloc": 0, "Boulder Planet": 18, "BFF": 0}
+
+        def _fetch():
+            ss = self._get_spreadsheet()
+            try:
+                ws = ss.worksheet("Balances")
+                return ws.get_all_values()
+            except Exception:
+                return []
+
+        try:
+            rows = self._execute_with_retry(_fetch)
+            if rows and len(rows) > 1:
+                balances = dict(defaults)
+                for r in rows[1:]:
+                    if len(r) >= 2 and r[0].strip():
+                        g_norm = normalize_gym_name(r[0])
+                        try:
+                            balances[g_norm] = int(float(r[1].strip()))
+                        except Exception:
+                            pass
+                self._balances_cache = balances
+                return balances
+        except Exception:
+            pass
+
+        self._balances_cache = defaults
+        return defaults
+
+    def get_available_passes(self, gym: str = "Boulder +") -> int:
+        from parsers.sheet_parser import normalize_gym_name
+        norm = normalize_gym_name(gym)
+        balances = self.get_all_available_passes()
+        defaults = {"Boulder +": 9, "Fitbloc": 0, "Boulder Planet": 18, "BFF": 0}
+        return balances.get(norm, defaults.get(norm, 0))
+
+    def set_available_passes(
+        self,
+        gym: str,
+        count: int,
+        updated_by: str = "",
+        note: str = "",
+    ) -> None:
+        from datetime import datetime
+        from parsers.sheet_parser import normalize_gym_name
+        norm = normalize_gym_name(gym)
+        if self._balances_cache is None:
+            self.get_all_available_passes()
+        self._balances_cache[norm] = int(count)
+
+        def _update():
+            ss = self._get_spreadsheet()
+            try:
+                ws = ss.worksheet("Balances")
+            except Exception:
+                ws = ss.add_worksheet(title="Balances", rows=50, cols=5)
+                ws.append_row(["gym", "available_passes", "updated_at", "updated_by", "note"])
+
+            rows = ws.get_all_values()
+            now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+            row_idx = None
+            if rows:
+                for i, r in enumerate(rows[1:], start=2):
+                    if r and normalize_gym_name(r[0]) == norm:
+                        row_idx = i
+                        break
+
+            if row_idx is not None:
+                ws.update(range_name=f"A{row_idx}:E{row_idx}", values=[[norm, str(count), now_str, updated_by, note]])
+            else:
+                ws.append_row([norm, str(count), now_str, updated_by, note])
+
+        self._execute_with_retry(_update)

@@ -82,3 +82,29 @@ def test_local_storage_crud() -> None:
         uploads = storage.get_uploads()
         assert len(uploads) == 1
         assert uploads[0]["filename"] == "audit.pdf"
+
+
+def test_local_storage_balances() -> None:
+    # verify available passes balance persistence
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        storage = LocalCsvStorage(data_dir=tmp_dir)
+
+        # verify defaults
+        assert storage.get_available_passes("Boulder +") == 9
+        assert storage.get_available_passes("Fitbloc") == 0
+        assert storage.get_available_passes("Boulder Planet") == 18
+
+        # update balances
+        storage.set_available_passes("Boulder +", 50, updated_by="treasurer", note="New pass package")
+        storage.set_available_passes("Fitbloc", 20, updated_by="treasurer", note="Fitbloc topup")
+
+        assert storage.get_available_passes("Boulder +") == 50
+        assert storage.get_available_passes("Boulder Plus") == 50
+        assert storage.get_available_passes("Fitbloc") == 20
+        assert storage.get_available_passes("Boulder Planet") == 18
+
+        # verify re-loading from disk in new instance
+        reloaded = LocalCsvStorage(data_dir=tmp_dir)
+        assert reloaded.get_available_passes("Boulder +") == 50
+        assert reloaded.get_available_passes("Fitbloc") == 20
+        assert reloaded.get_available_passes("Boulder Planet") == 18

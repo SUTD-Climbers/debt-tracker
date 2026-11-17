@@ -78,3 +78,24 @@ class StorageBackend(ABC):
     def get_latest_updated_date(self, gym: str = "Boulder +") -> Optional[datetime]:
         # retrieve latest pass date recorded or sheet last updated date
         return None
+
+    def get_available_passes(self, gym: str = "Boulder +") -> int:
+        # retrieve available passes balance for specified gym
+        from parsers.sheet_parser import normalize_gym_name
+        norm = normalize_gym_name(gym)
+        defaults = {"Boulder +": 9, "Fitbloc": 0, "Boulder Planet": 18, "BFF": 0}
+        return defaults.get(norm, 0)
+
+    def set_available_passes(
+        self,
+        gym: str,
+        count: int,
+        updated_by: str = "",
+        note: str = "",
+    ) -> None:
+        # persist available passes balance for specified gym
+        pass
+
+    def get_all_available_passes(self) -> Dict[str, int]:
+        # retrieve all available gym pass balances
+        return {"Boulder +": 9, "Fitbloc": 0, "Boulder Planet": 18, "BFF": 0}
