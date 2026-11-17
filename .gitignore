@@ -1,0 +1,30 @@
+# environment
+.env
+.env/
+
+# secrets and credentials (CRITICAL: never commit these)
+.streamlit/secrets.toml
+credentials.json
+service_account.json
+*.json
+
+# local member data and upload samples
+data/*.csv
+data/*.json
+!data/cover.jpg
+samples/
+*.pdf
+
+# python artifacts and cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ide and os files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

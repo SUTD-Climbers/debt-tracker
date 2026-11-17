@@ -1,0 +1,18 @@
+# core web app framework
+streamlit==1.58.0
+
+# data manipulation and analytics
+pandas==2.3.3
+
+# pdf parsing and coordinate extraction
+pdfplumber==0.11.4
+
+# data visualization
+altair==6.1.0
+
+# google sheets integration and authentication
+gspread==6.1.4
+google-auth==2.50.0
+
+# secure password hashing
+bcrypt==4.3.0

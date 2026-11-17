@@ -1,0 +1,2 @@
+# test runner and fixtures
+pytest==8.3.4
